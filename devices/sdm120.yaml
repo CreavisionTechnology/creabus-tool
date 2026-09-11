@@ -1,0 +1,356 @@
+# =============================================================================
+#  Eastron SDM120-Modbus  --  single phase two wire energy meter
+# =============================================================================
+#  This file completely describes the simulated device.  Edit it (or drop a new
+#  file next to it) and the Modbus TCP server behaves as a different device -
+#  no Python changes required.  See devices/README.md for the full schema.
+# =============================================================================
+
+device:
+  name: "Eastron SDM120"
+  model: "SDM120-Modbus"
+  vendor: "Eastron"
+  description: "Single phase two wire (1P2W) DIN rail energy meter, 45 A"
+
+  unit_id: 1                 # Modbus slave / unit id this device answers on
+  default_interval: 30       # seconds between value changes when a register
+                             # does not specify its own "interval"
+  word_order: big            # big  = most significant 16-bit word first (SDM120)
+  byte_order: big            # big  = most significant byte first inside a word
+  gap_policy: zero           # zero      -> undefined addresses read back as 0
+                             # exception -> reply "illegal data address" (0x02)
+
+# -----------------------------------------------------------------------------
+#  Registers
+# -----------------------------------------------------------------------------
+#  table    : input | holding | coil | discrete
+#  address  : protocol address, 0 based (0x0000 == 30001 for input registers)
+#  type     : float32 float64 int16 uint16 int32 uint32 int64 uint64 bool string
+#  mode     : walk | random | fixed | expression | accumulator
+#  min/max  : limits used to generate / clamp the random value
+#  step     : max change per update (walk mode).  Default = (max-min)/20
+#  interval : seconds between changes for THIS register (default: 30, above)
+#
+#  All Eastron input registers are IEEE-754 32 bit floats spanning 2 registers.
+# -----------------------------------------------------------------------------
+registers:
+
+  # --- live electrical values ------------------------------------------------
+  - name: voltage
+    label: "Voltage"
+    table: input
+    address: 0x0000          # 30001
+    type: float32
+    unit: V
+    mode: walk
+    min: 226.0
+    max: 243.0
+    start: 236.7
+    step: 0.8
+    interval: 5
+    decimals: 2
+
+  - name: current
+    label: "Current"
+    table: input
+    address: 0x0006          # 30007
+    type: float32
+    unit: A
+    mode: walk
+    min: 0.25
+    max: 12.0
+    start: 2.41
+    step: 0.35
+    interval: 5
+    decimals: 3
+
+  - name: power_factor
+    label: "Power factor"
+    table: input
+    address: 0x001E          # 30031
+    type: float32
+    unit: ""
+    mode: walk
+    min: 0.82
+    max: 0.999
+    start: 0.951
+    step: 0.02
+    interval: 10
+    decimals: 3
+
+  - name: frequency
+    label: "Frequency"
+    table: input
+    address: 0x0046          # 30071
+    type: float32
+    unit: Hz
+    mode: walk
+    min: 49.90
+    max: 50.10
+    start: 50.01
+    step: 0.03
+    interval: 10
+    decimals: 2
+
+  # --- derived values: kept electrically consistent with the ones above ------
+  - name: active_power
+    label: "Active power"
+    table: input
+    address: 0x000C          # 30013
+    type: float32
+    unit: W
+    mode: expression
+    expression: "voltage * current * power_factor"
+    decimals: 2
+
+  - name: apparent_power
+    label: "Apparent power"
+    table: input
+    address: 0x0012          # 30019
+    type: float32
+    unit: VA
+    mode: expression
+    expression: "voltage * current"
+    decimals: 2
+
+  - name: reactive_power
+    label: "Reactive power"
+    table: input
+    address: 0x0018          # 30025
+    type: float32
+    unit: var
+    mode: expression
+    expression: "sqrt(max(apparent_power**2 - active_power**2, 0.0))"
+    decimals: 2
+
+  - name: phase_angle
+    label: "Phase angle"
+    table: input
+    address: 0x0024          # 30037
+    type: float32
+    unit: "deg"
+    mode: expression
+    expression: "degrees(acos(min(power_factor, 1.0)))"
+    decimals: 2
+
+  # --- energy counters: only ever go up --------------------------------------
+  - name: import_active_energy
+    label: "Import active energy"
+    table: input
+    address: 0x0048          # 30073
+    type: float32
+    unit: kWh
+    mode: accumulator
+    rate: "active_power / 3600000.0"     # W -> kWh per second
+    start: 12345.678
+    max: 99999999.0
+    interval: 10
+    decimals: 3
+
+  - name: export_active_energy
+    label: "Export active energy"
+    table: input
+    address: 0x004A          # 30075
+    type: float32
+    unit: kWh
+    mode: fixed
+    value: 0.0
+
+  - name: import_reactive_energy
+    label: "Import reactive energy"
+    table: input
+    address: 0x004C          # 30077
+    type: float32
+    unit: kvarh
+    mode: accumulator
+    rate: "reactive_power / 3600000.0"
+    start: 3210.987
+    max: 99999999.0
+    interval: 10
+    decimals: 3
+
+  - name: export_reactive_energy
+    label: "Export reactive energy"
+    table: input
+    address: 0x004E          # 30079
+    type: float32
+    unit: kvarh
+    mode: fixed
+    value: 0.0
+
+  - name: total_active_energy
+    label: "Total active energy"
+    table: input
+    address: 0x0156          # 30343
+    type: float32
+    unit: kWh
+    mode: expression
+    expression: "import_active_energy + export_active_energy"
+    decimals: 3
+
+  - name: total_reactive_energy
+    label: "Total reactive energy"
+    table: input
+    address: 0x0158          # 30345
+    type: float32
+    unit: kvarh
+    mode: expression
+    expression: "import_reactive_energy + export_reactive_energy"
+    decimals: 3
+
+  # --- demand values (sliding window averages on a real meter) ---------------
+  - name: total_system_power_demand
+    label: "Total system power demand"
+    table: input
+    address: 0x0054          # 30085
+    type: float32
+    unit: W
+    mode: expression
+    expression: "active_power * 0.92"
+    interval: 60
+    decimals: 2
+
+  - name: max_total_system_power_demand
+    label: "Max total system power demand"
+    table: input
+    address: 0x0056          # 30087
+    type: float32
+    unit: W
+    # a self referencing expression gives you a peak-hold register
+    mode: expression
+    expression: "max(max_total_system_power_demand, total_system_power_demand)"
+    start: 0.0
+    interval: 60
+    decimals: 2
+
+  - name: import_system_power_demand
+    label: "Import system power demand"
+    table: input
+    address: 0x0058          # 30089
+    type: float32
+    unit: W
+    mode: expression
+    expression: "total_system_power_demand"
+    interval: 60
+    decimals: 2
+
+  - name: max_import_system_power_demand
+    label: "Max import system power demand"
+    table: input
+    address: 0x005A          # 30091
+    type: float32
+    unit: W
+    mode: expression
+    expression: "max(max_import_system_power_demand, import_system_power_demand)"
+    start: 0.0
+    interval: 60
+    decimals: 2
+
+  - name: export_system_power_demand
+    label: "Export system power demand"
+    table: input
+    address: 0x005C          # 30093
+    type: float32
+    unit: W
+    mode: fixed
+    value: 0.0
+
+  - name: max_export_system_power_demand
+    label: "Max export system power demand"
+    table: input
+    address: 0x005E          # 30095
+    type: float32
+    unit: W
+    mode: fixed
+    value: 0.0
+
+  - name: current_demand
+    label: "Current demand"
+    table: input
+    address: 0x0102          # 30259
+    type: float32
+    unit: A
+    mode: expression
+    expression: "current * 0.92"
+    interval: 60
+    decimals: 3
+
+  - name: max_current_demand
+    label: "Max current demand"
+    table: input
+    address: 0x0108          # 30265
+    type: float32
+    unit: A
+    mode: expression
+    expression: "max(max_current_demand, current_demand)"
+    start: 0.0
+    interval: 60
+    decimals: 3
+
+  # --- holding registers: configuration, readable AND writable ---------------
+  #  NOTE: the input register map above is the well documented part of the
+  #  SDM120 protocol.  Some holding register addresses differ between firmware
+  #  revisions - check the manual that came with your meter and adjust here.
+  - name: relay_pulse_width
+    label: "Relay pulse width"
+    table: holding
+    address: 0x0000          # 40001
+    type: float32
+    unit: ms
+    mode: fixed
+    value: 100.0
+    writable: true
+
+  - name: network_parity_stop
+    label: "Network parity / stop bits"
+    table: holding
+    address: 0x0002          # 40003 : 0=N-1, 1=E-1, 2=O-1, 3=N-2
+    type: float32
+    mode: fixed
+    value: 0.0
+    writable: true
+
+  - name: network_node
+    label: "Meter id (network node)"
+    table: holding
+    address: 0x0004          # 40005
+    type: float32
+    mode: fixed
+    value: 1.0
+    writable: true
+
+  - name: scroll_display_time
+    label: "Time of scroll display"
+    table: holding
+    address: 0x0014          # 40021
+    type: float32
+    unit: s
+    mode: fixed
+    value: 0.0
+    writable: true
+
+  - name: baud_rate
+    label: "Baud rate"
+    table: holding
+    address: 0x001C          # 40029 : 0=2400 1=4800 2=9600 5=1200
+    type: float32
+    mode: fixed
+    value: 2.0
+    writable: true
+
+  - name: pulse_1_output_mode
+    label: "Pulse 1 output mode"
+    table: holding
+    address: 0x0056          # 40087 : 1=import+export, 2=import, 4=export
+    type: float32
+    mode: fixed
+    value: 4.0
+    writable: true
+
+  - name: serial_number
+    label: "Serial number"
+    table: holding
+    address: 0xFC00          # 64512
+    type: uint32
+    mode: fixed
+    value: 20481137

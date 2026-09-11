@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.log
+
+# generated per build machine, so the versions in it are the versions that
+# actually shipped; CI writes it and attaches it to the release
+sbom.cdx.json
+
+# build output
+build/
+dist/
+*.spec
+release/
+
+# environments
+.venv/
+venv/
+env/
+
+# editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# local agent/tool settings that can carry machine specific paths
+.claude/settings.local.json

@@ -1,0 +1,233 @@
+# =============================================================================
+#  SunSpec meter  --  Common Model (1) + AC Meter, Three Phase Wye (203)
+# =============================================================================
+#  WHERE THIS MAP COMES FROM
+#  SunSpec is an open specification from the SunSpec Alliance. Model 203 is the
+#  three phase wye (star) meter with integer values and scale factors. It is
+#  what most SunSpec speaking meters and inverter-attached energy meters
+#  present - including the export/import meters fitted alongside PV inverters
+#  for feed-in limiting.
+#
+#  Same three checks as the inverter profile before you trust a reading:
+#  the base address (40001 / 50001 / 1 in the manual means protocol address
+#  40000 / 50000 / 0 on the wire - this file uses 40000), the unit id, and
+#  which models your meter actually implements. Walk the chain from "SunS".
+#
+#  WHAT IS AND IS NOT HERE
+#  Model 203 is 105 registers. This file fills in the part almost everyone
+#  reads - currents, voltages, frequency, power, power factor and the Wh
+#  import/export counters - and leaves the apparent-energy (VAh) and
+#  reactive-energy (VArh) quadrant blocks as gaps, which read back as zero.
+#  The model id, length and the position of the End model are still correct,
+#  so a client that walks the chain finds exactly what it expects. Add the
+#  rows you need from your meter's manual; the format is identical.
+#
+#  SIGN CONVENTION
+#  This simulates a site IMPORTING from the grid, so W is positive and the
+#  import counters climb while the export counters stand still. A site with PV
+#  exporting would show negative W. SunSpec counters are unsigned and only
+#  ever increase; direction is which counter moves.
+#
+#  Everything lives in HOLDING registers (function code 3), as SunSpec requires.
+# =============================================================================
+
+device:
+  name: "SunSpec meter"
+  model: "Model 203, three phase wye"
+  vendor: "SunSpec Alliance (open specification)"
+  description: "Three phase four wire revenue meter, SunSpec Common + 203"
+  unit_id: 1
+  default_interval: 30
+  word_order: big
+  byte_order: big
+  gap_policy: zero         # the VAh and VArh blocks read back as zero
+
+registers:
+
+  # === the marker that says "this is a SunSpec device" ========================
+  - {name: sunspec_id, label: "SunSpec marker", table: holding, address: 40000,
+     type: string, length: 4, mode: fixed, value: "SunS", writable: false}
+
+  # === Common Model, id 1, length 66 =========================================
+  - {name: common_id, label: "Common model id", table: holding, address: 40002,
+     type: uint16, mode: fixed, value: 1, writable: false}
+  - {name: common_length, label: "Common model length", table: holding, address: 40003,
+     type: uint16, mode: fixed, value: 66, writable: false}
+  - {name: manufacturer, label: "Manufacturer (Mn)", table: holding, address: 40004,
+     type: string, length: 32, mode: fixed, value: "Creavision", writable: false}
+  - {name: model_name, label: "Model (Md)", table: holding, address: 40020,
+     type: string, length: 32, mode: fixed, value: "Simulated 3P meter", writable: false}
+  - {name: options, label: "Options (Opt)", table: holding, address: 40036,
+     type: string, length: 16, mode: fixed, value: "sim", writable: false}
+  - {name: firmware, label: "Version (Vr)", table: holding, address: 40044,
+     type: string, length: 16, mode: fixed, value: "1.0.0", writable: false}
+  - {name: serial_number, label: "Serial number (SN)", table: holding, address: 40052,
+     type: string, length: 32, mode: fixed, value: "SIM-0000000002", writable: false}
+  - {name: device_address, label: "Modbus address (DA)", table: holding, address: 40068,
+     type: uint16, mode: fixed, value: 1, writable: false}
+
+  # === Meter model, id 203, length 105 =======================================
+  - {name: meter_id, label: "Meter model id", table: holding, address: 40070,
+     type: uint16, mode: fixed, value: 203, writable: false}
+  - {name: meter_length, label: "Meter model length", table: holding, address: 40071,
+     type: uint16, mode: fixed, value: 105, writable: false}
+
+  # --- current, A_SF = -2 ----------------------------------------------------
+  - {name: current, label: "Current total (A)", table: holding, address: 40072,
+     type: int16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: expression, expression: "current_a + current_b + current_c"}
+  - {name: current_a, label: "Current L1 (AphA)", table: holding, address: 40073,
+     type: int16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 1.0, max: 42.0, start: 18.3, step: 1.4, interval: 5}
+  - {name: current_b, label: "Current L2 (AphB)", table: holding, address: 40074,
+     type: int16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 1.0, max: 42.0, start: 15.7, step: 1.4, interval: 5}
+  - {name: current_c, label: "Current L3 (AphC)", table: holding, address: 40075,
+     type: int16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 1.0, max: 42.0, start: 21.1, step: 1.4, interval: 5}
+  - {name: current_sf, label: "A_SF", table: holding, address: 40076,
+     type: int16, mode: fixed, value: -2, writable: false}
+
+  # --- voltage, V_SF = -1 ----------------------------------------------------
+  - {name: voltage_ln, label: "Voltage L-N average (PhV)", table: holding, address: 40077,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "(voltage_a + voltage_b + voltage_c) / 3"}
+  - {name: voltage_a, label: "Voltage L1-N (PhVphA)", table: holding, address: 40078,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 227.0, max: 243.0, start: 236.2, step: 0.7, interval: 5}
+  - {name: voltage_b, label: "Voltage L2-N (PhVphB)", table: holding, address: 40079,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 227.0, max: 243.0, start: 234.6, step: 0.7, interval: 5}
+  - {name: voltage_c, label: "Voltage L3-N (PhVphC)", table: holding, address: 40080,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 227.0, max: 243.0, start: 238.4, step: 0.7, interval: 5}
+  - {name: voltage_ll, label: "Voltage L-L average (PPV)", table: holding, address: 40081,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "voltage_ln * 1.732"}
+  - {name: voltage_ab, label: "Voltage L1-L2 (PPVphAB)", table: holding, address: 40082,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "(voltage_a + voltage_b) / 2 * 1.732"}
+  - {name: voltage_bc, label: "Voltage L2-L3 (PPVphBC)", table: holding, address: 40083,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "(voltage_b + voltage_c) / 2 * 1.732"}
+  - {name: voltage_ca, label: "Voltage L3-L1 (PPVphCA)", table: holding, address: 40084,
+     type: int16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "(voltage_c + voltage_a) / 2 * 1.732"}
+  - {name: voltage_sf, label: "V_SF", table: holding, address: 40085,
+     type: int16, mode: fixed, value: -1, writable: false}
+
+  # --- frequency, Hz_SF = -2 -------------------------------------------------
+  - {name: frequency, label: "Frequency (Hz)", table: holding, address: 40086,
+     type: int16, unit: Hz, scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 49.90, max: 50.10, start: 49.99, step: 0.02, interval: 5}
+  - {name: frequency_sf, label: "Hz_SF", table: holding, address: 40087,
+     type: int16, mode: fixed, value: -2, writable: false}
+
+  # --- active power, W_SF = 0 ------------------------------------------------
+  - {name: power, label: "Active power total (W)", table: holding, address: 40088,
+     type: int16, unit: W, decimals: 0, writable: false,
+     mode: expression, expression: "power_a + power_b + power_c"}
+  - {name: power_a, label: "Active power L1 (WphA)", table: holding, address: 40089,
+     type: int16, unit: W, decimals: 0, writable: false,
+     mode: expression, expression: "voltage_a * current_a * pf_a / 100.0"}
+  - {name: power_b, label: "Active power L2 (WphB)", table: holding, address: 40090,
+     type: int16, unit: W, decimals: 0, writable: false,
+     mode: expression, expression: "voltage_b * current_b * pf_b / 100.0"}
+  - {name: power_c, label: "Active power L3 (WphC)", table: holding, address: 40091,
+     type: int16, unit: W, decimals: 0, writable: false,
+     mode: expression, expression: "voltage_c * current_c * pf_c / 100.0"}
+  - {name: power_sf, label: "W_SF", table: holding, address: 40092,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- apparent power, VA_SF = 0 ---------------------------------------------
+  - {name: apparent, label: "Apparent power total (VA)", table: holding, address: 40093,
+     type: int16, unit: VA, decimals: 0, writable: false,
+     mode: expression, expression: "apparent_a + apparent_b + apparent_c"}
+  - {name: apparent_a, label: "Apparent power L1 (VAphA)", table: holding, address: 40094,
+     type: int16, unit: VA, decimals: 0, writable: false,
+     mode: expression, expression: "voltage_a * current_a"}
+  - {name: apparent_b, label: "Apparent power L2 (VAphB)", table: holding, address: 40095,
+     type: int16, unit: VA, decimals: 0, writable: false,
+     mode: expression, expression: "voltage_b * current_b"}
+  - {name: apparent_c, label: "Apparent power L3 (VAphC)", table: holding, address: 40096,
+     type: int16, unit: VA, decimals: 0, writable: false,
+     mode: expression, expression: "voltage_c * current_c"}
+  - {name: apparent_sf, label: "VA_SF", table: holding, address: 40097,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- reactive power, VAR_SF = 0 --------------------------------------------
+  - {name: reactive, label: "Reactive power total (VAR)", table: holding, address: 40098,
+     type: int16, unit: var, decimals: 0, writable: false,
+     mode: expression, expression: "reactive_a + reactive_b + reactive_c"}
+  - {name: reactive_a, label: "Reactive power L1 (VARphA)", table: holding, address: 40099,
+     type: int16, unit: var, decimals: 0, writable: false,
+     mode: expression,
+     expression: "sqrt(max(apparent_a * apparent_a - power_a * power_a, 0.0))"}
+  - {name: reactive_b, label: "Reactive power L2 (VARphB)", table: holding, address: 40100,
+     type: int16, unit: var, decimals: 0, writable: false,
+     mode: expression,
+     expression: "sqrt(max(apparent_b * apparent_b - power_b * power_b, 0.0))"}
+  - {name: reactive_c, label: "Reactive power L3 (VARphC)", table: holding, address: 40101,
+     type: int16, unit: var, decimals: 0, writable: false,
+     mode: expression,
+     expression: "sqrt(max(apparent_c * apparent_c - power_c * power_c, 0.0))"}
+  - {name: reactive_sf, label: "VAR_SF", table: holding, address: 40102,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- power factor, PF_SF = -2, carried as a percentage ---------------------
+  - {name: power_factor, label: "Power factor total (PF)", table: holding, address: 40103,
+     type: int16, unit: "%", scale: 0.01, decimals: 2, writable: false,
+     mode: expression, expression: "(pf_a + pf_b + pf_c) / 3"}
+  - {name: pf_a, label: "Power factor L1 (PFphA)", table: holding, address: 40104,
+     type: int16, unit: "%", scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 88.0, max: 99.5, start: 95.8, step: 1.0, interval: 10}
+  - {name: pf_b, label: "Power factor L2 (PFphB)", table: holding, address: 40105,
+     type: int16, unit: "%", scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 88.0, max: 99.5, start: 94.1, step: 1.0, interval: 10}
+  - {name: pf_c, label: "Power factor L3 (PFphC)", table: holding, address: 40106,
+     type: int16, unit: "%", scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 88.0, max: 99.5, start: 96.9, step: 1.0, interval: 10}
+  - {name: pf_sf, label: "PF_SF", table: holding, address: 40107,
+     type: int16, mode: fixed, value: -2, writable: false}
+
+  # --- exported energy. This site imports, so these stand still. -------------
+  - {name: wh_exported, label: "Exported energy (TotWhExp)", table: holding, address: 40108,
+     type: uint32, unit: Wh, decimals: 0, mode: fixed, value: 0, writable: false}
+
+  # --- imported energy, the counters that actually move ----------------------
+  - {name: wh_imported, label: "Imported energy (TotWhImp)", table: holding, address: 40116,
+     type: uint32, unit: Wh, decimals: 0, writable: false,
+     mode: accumulator, rate: "power / 3600.0", start: 128400000, max: 4000000000,
+     interval: 10}
+  - {name: wh_imported_a, label: "Imported energy L1 (TotWhImpPhA)", table: holding,
+     address: 40118, type: uint32, unit: Wh, decimals: 0, writable: false,
+     mode: accumulator, rate: "power_a / 3600.0", start: 44100000, max: 4000000000,
+     interval: 10}
+  - {name: wh_imported_b, label: "Imported energy L2 (TotWhImpPhB)", table: holding,
+     address: 40120, type: uint32, unit: Wh, decimals: 0, writable: false,
+     mode: accumulator, rate: "power_b / 3600.0", start: 39800000, max: 4000000000,
+     interval: 10}
+  - {name: wh_imported_c, label: "Imported energy L3 (TotWhImpPhC)", table: holding,
+     address: 40122, type: uint32, unit: Wh, decimals: 0, writable: false,
+     mode: accumulator, rate: "power_c / 3600.0", start: 44500000, max: 4000000000,
+     interval: 10}
+  - {name: wh_sf, label: "TotWh_SF", table: holding, address: 40124,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- the VAh block (40125-40140) and the VArh quadrants (40142-40173) are
+  #     left out and read back as zero. Their scale factors are still here so a
+  #     client that reads them gets 0 Wh rather than a nonsense exponent.
+  - {name: vah_sf, label: "TotVAh_SF", table: holding, address: 40141,
+     type: int16, mode: fixed, value: 0, writable: false}
+  - {name: varh_sf, label: "TotVArh_SF", table: holding, address: 40174,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- meter event flags, all clear -----------------------------------------
+  - {name: events, label: "Events (Evt)", table: holding, address: 40175,
+     type: uint32, mode: fixed, value: 0, writable: false}
+
+  # === end of the model chain, id 65535 ======================================
+  - {name: end_id, label: "End model id", table: holding, address: 40177,
+     type: uint16, mode: fixed, value: 65535, writable: false}
+  - {name: end_length, label: "End model length", table: holding, address: 40178,
+     type: uint16, mode: fixed, value: 0, writable: false}

@@ -1,0 +1,120 @@
+# =============================================================================
+#  Generic PLC I/O rack  --  all four Modbus tables in one device
+# =============================================================================
+#  This is NOT a particular manufacturer's product and does not pretend to be.
+#  It is the shape almost every PLC, remote I/O block and RTU gateway takes:
+#
+#    coils            digital outputs you can switch
+#    discrete inputs  digital inputs you can only read
+#    input registers  measurements the field devices produce
+#    holding          setpoints and configuration you can write
+#
+#  Which makes it the profile to point a new SCADA client, HMI or Modbus
+#  library at first: it exercises all four tables, both bit functions and both
+#  register functions, and read only versus writable - so if something in your
+#  client is broken, it shows up here rather than three weeks into a job.
+#
+#  The addresses are laid out on tidy boundaries on purpose. A real rack
+#  numbers its points however its vendor chose; copy this file and move them.
+# =============================================================================
+
+device:
+  name: "Generic PLC I/O rack"
+  model: "8 DO / 8 DI / 8 AI / 6 setpoints"
+  vendor: "(no vendor - a generic example)"
+  description: "Digital and analogue I/O across all four Modbus tables"
+  unit_id: 1
+  default_interval: 15
+  word_order: big
+  byte_order: big
+  gap_policy: zero
+
+registers:
+
+  # === COILS - digital outputs, read and write (FC1, FC5, FC15) ==============
+  # A client may switch any of these. The simulation leaves them alone: they
+  # hold whatever was last written, like real relay outputs.
+  - {name: do_pump_1, label: "DO0 Pump 1 run", table: coil, address: 0, mode: fixed, value: 1}
+  - {name: do_pump_2, label: "DO1 Pump 2 run", table: coil, address: 1, mode: fixed, value: 0}
+  - {name: do_valve_inlet, label: "DO2 Inlet valve", table: coil, address: 2,
+     mode: fixed, value: 1}
+  - {name: do_valve_outlet, label: "DO3 Outlet valve", table: coil, address: 3,
+     mode: fixed, value: 0}
+  - {name: do_heater, label: "DO4 Heater contactor", table: coil, address: 4,
+     mode: fixed, value: 0}
+  - {name: do_fan, label: "DO5 Fan", table: coil, address: 5, mode: fixed, value: 1}
+  - {name: do_alarm_beacon, label: "DO6 Alarm beacon", table: coil, address: 6,
+     mode: fixed, value: 0}
+  - {name: do_spare, label: "DO7 Spare", table: coil, address: 7, mode: fixed, value: 0}
+
+  # === DISCRETE INPUTS - read only field contacts (FC2) ======================
+  # These move on their own, as field contacts do. A client cannot write them:
+  # try it and the server answers 0x02, which is the correct behaviour and
+  # worth testing your client against.
+  - {name: di_pump_1_running, label: "DI0 Pump 1 feedback", table: discrete, address: 0,
+     mode: expression, expression: "do_pump_1"}
+  - {name: di_pump_2_running, label: "DI1 Pump 2 feedback", table: discrete, address: 1,
+     mode: expression, expression: "do_pump_2"}
+  - {name: di_level_low, label: "DI2 Level low switch", table: discrete, address: 2,
+     mode: expression, expression: "tank_level < 15.0"}
+  - {name: di_level_high, label: "DI3 Level high switch", table: discrete, address: 3,
+     mode: expression, expression: "tank_level > 85.0"}
+  - {name: di_door, label: "DI4 Cabinet door", table: discrete, address: 4,
+     mode: random, interval: 120}
+  - {name: di_estop, label: "DI5 E-stop healthy", table: discrete, address: 5,
+     mode: fixed, value: 1}
+  - {name: di_mains_ok, label: "DI6 Mains healthy", table: discrete, address: 6,
+     mode: fixed, value: 1}
+  - {name: di_spare, label: "DI7 Spare", table: discrete, address: 7, mode: fixed, value: 0}
+
+  # === INPUT REGISTERS - measurements, read only (FC4) =======================
+  # int16 with a scale factor is how most cheap I/O reports analogue values:
+  # the register holds tenths, the client multiplies. Two words per value is
+  # the other common choice - see the 32 bit totalisers below.
+  - {name: tank_level, label: "AI0 Tank level", table: input, address: 0, type: int16,
+     unit: "%", scale: 0.1, decimals: 1, mode: walk, min: 8.0, max: 94.0, start: 61.3,
+     step: 2.5, interval: 5}
+  - {name: pressure, label: "AI1 Line pressure", table: input, address: 1, type: int16,
+     unit: bar, scale: 0.01, decimals: 2, mode: walk, min: 1.20, max: 6.40, start: 4.15,
+     step: 0.25, interval: 5}
+  - {name: temperature, label: "AI2 Process temperature", table: input, address: 2,
+     type: int16, unit: "C", scale: 0.1, decimals: 1, mode: walk, min: -5.0, max: 78.0,
+     start: 42.7, step: 1.5, interval: 10}
+  - {name: flow_rate, label: "AI3 Flow rate", table: input, address: 3, type: int16,
+     unit: "l/min", scale: 0.1, decimals: 1, mode: expression,
+     expression: "(do_pump_1 * 118.0 + do_pump_2 * 96.0) * (0.9 + uniform(0, 0.2))"}
+  - {name: motor_current, label: "AI4 Motor current", table: input, address: 4,
+     type: int16, unit: A, scale: 0.01, decimals: 2, mode: expression,
+     expression: "do_pump_1 * 6.2 + do_pump_2 * 5.4 + uniform(0, 0.3)"}
+  - {name: analogue_spare, label: "AI5 Spare", table: input, address: 5, type: int16,
+     mode: fixed, value: 0}
+
+  # A 32 bit total, high word first, to exercise the other decoding path.
+  - {name: flow_total, label: "Flow totaliser", table: input, address: 8, type: uint32,
+     unit: l, decimals: 0, mode: accumulator, rate: "flow_rate / 60.0", start: 8421900,
+     max: 4000000000, interval: 10}
+  - {name: run_hours, label: "Pump 1 run hours", table: input, address: 10, type: uint32,
+     unit: h, decimals: 2, mode: accumulator, rate: "do_pump_1 / 3600.0", start: 14237,
+     max: 1000000, interval: 30}
+
+  # === HOLDING REGISTERS - setpoints, read and write (FC3, FC6, FC16) ========
+  # Written values stick, which is what makes this useful for testing a client
+  # that has to configure a device rather than just read it.
+  - {name: sp_level_start, label: "SP Pump start level", table: holding, address: 0,
+     type: int16, unit: "%", scale: 0.1, decimals: 1, mode: fixed, value: 25.0}
+  - {name: sp_level_stop, label: "SP Pump stop level", table: holding, address: 1,
+     type: int16, unit: "%", scale: 0.1, decimals: 1, mode: fixed, value: 80.0}
+  - {name: sp_pressure_max, label: "SP Pressure trip", table: holding, address: 2,
+     type: int16, unit: bar, scale: 0.01, decimals: 2, mode: fixed, value: 6.00}
+  - {name: sp_temperature, label: "SP Temperature", table: holding, address: 3,
+     type: int16, unit: "C", scale: 0.1, decimals: 1, mode: fixed, value: 45.0}
+  - {name: sp_mode, label: "SP Mode (0 off 1 auto 2 manual)", table: holding, address: 4,
+     type: uint16, mode: fixed, value: 1}
+  - {name: sp_ramp_seconds, label: "SP Ramp time", table: holding, address: 5,
+     type: uint16, unit: s, mode: fixed, value: 30}
+
+  # --- identity, read only even though it lives in the holding table ---------
+  - {name: firmware_version, label: "Firmware version", table: holding, address: 16,
+     type: string, length: 8, mode: fixed, value: "1.4.2", writable: false}
+  - {name: serial_number, label: "Serial number", table: holding, address: 20,
+     type: uint32, mode: fixed, value: 70154329, writable: false}

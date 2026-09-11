@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CreaBus Tool application mark.
+  Original artwork for this project, (c) Creavision Technology, MIT licensed
+  with the rest of the repository. It is not derived from, and is not intended
+  to resemble, the Modbus Organization logo or any other existing mark.
+
+  The letter M is drawn as a single signal path between three nodes: the shape
+  of the letter is also the shape of a request travelling a bus.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E413A"/>
+      <stop offset="1" stop-color="#142C26"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#tile)"/>
+
+  <!-- the bus the mark sits on -->
+  <line x1="62" y1="198" x2="194" y2="198" stroke="#8FD9A0" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- the M, drawn as one continuous path -->
+  <polyline points="62,178 62,82 128,144 194,82 194,178"
+            fill="none" stroke="#F7F9F8" stroke-width="24"
+            stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- nodes on the path -->
+  <circle cx="62"  cy="82"  r="13" fill="#8FD9A0"/>
+  <circle cx="194" cy="82"  r="13" fill="#8FD9A0"/>
+  <circle cx="128" cy="144" r="13" fill="#8FD9A0"/>
+</svg>

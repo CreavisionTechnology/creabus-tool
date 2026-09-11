@@ -1,0 +1,7 @@
+# The simulator itself is pure standard library (socket, socketserver, tkinter).
+#
+# PyYAML  reads the .yaml device profiles. Convert a profile to .json and the
+#         app will load it with no third party code at all.
+# pyserial is only needed for Modbus RTU: TCP works without it.
+PyYAML>=6.0
+pyserial>=3.5

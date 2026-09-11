@@ -1,0 +1,149 @@
+# =============================================================================
+#  Eastron SDM630-Modbus  --  three phase four wire energy meter
+# =============================================================================
+#  Select this profile in the UI (or --device devices/sdm630.yaml) and the same
+#  server answers as a three phase meter instead.  Only this file changed.
+#
+#  This is a commonly used subset of the SDM630 input register map - add the
+#  rows you need from your meter's manual, the format is identical.
+# =============================================================================
+
+device:
+  name: "Eastron SDM630"
+  model: "SDM630-Modbus V2"
+  vendor: "Eastron"
+  description: "Three phase four wire (3P4W) DIN rail energy meter, 100 A"
+  unit_id: 1
+  default_interval: 30
+  word_order: big
+  byte_order: big
+  gap_policy: zero
+
+registers:
+
+  # --- per phase voltage -----------------------------------------------------
+  - {name: voltage_l1, label: "L1 voltage",  table: input, address: 0x0000, type: float32,
+     unit: V, mode: walk, min: 226.0, max: 243.0, start: 236.1, step: 0.8, interval: 5, decimals: 2}
+  - {name: voltage_l2, label: "L2 voltage",  table: input, address: 0x0002, type: float32,
+     unit: V, mode: walk, min: 226.0, max: 243.0, start: 234.8, step: 0.8, interval: 5, decimals: 2}
+  - {name: voltage_l3, label: "L3 voltage",  table: input, address: 0x0004, type: float32,
+     unit: V, mode: walk, min: 226.0, max: 243.0, start: 238.2, step: 0.8, interval: 5, decimals: 2}
+
+  # --- per phase current -----------------------------------------------------
+  - {name: current_l1, label: "L1 current",  table: input, address: 0x0006, type: float32,
+     unit: A, mode: walk, min: 0.4, max: 32.0, start: 8.4, step: 0.9, interval: 5, decimals: 3}
+  - {name: current_l2, label: "L2 current",  table: input, address: 0x0008, type: float32,
+     unit: A, mode: walk, min: 0.4, max: 32.0, start: 6.1, step: 0.9, interval: 5, decimals: 3}
+  - {name: current_l3, label: "L3 current",  table: input, address: 0x000A, type: float32,
+     unit: A, mode: walk, min: 0.4, max: 32.0, start: 9.7, step: 0.9, interval: 5, decimals: 3}
+
+  # --- per phase power factor ------------------------------------------------
+  - {name: pf_l1, label: "L1 power factor", table: input, address: 0x001E, type: float32,
+     mode: walk, min: 0.80, max: 0.999, start: 0.96, step: 0.02, interval: 10, decimals: 3}
+  - {name: pf_l2, label: "L2 power factor", table: input, address: 0x0020, type: float32,
+     mode: walk, min: 0.80, max: 0.999, start: 0.94, step: 0.02, interval: 10, decimals: 3}
+  - {name: pf_l3, label: "L3 power factor", table: input, address: 0x0022, type: float32,
+     mode: walk, min: 0.80, max: 0.999, start: 0.97, step: 0.02, interval: 10, decimals: 3}
+
+  # --- per phase power (derived) ---------------------------------------------
+  - {name: power_l1, label: "L1 active power", table: input, address: 0x000C, type: float32,
+     unit: W, mode: expression, expression: "voltage_l1 * current_l1 * pf_l1", decimals: 2}
+  - {name: power_l2, label: "L2 active power", table: input, address: 0x000E, type: float32,
+     unit: W, mode: expression, expression: "voltage_l2 * current_l2 * pf_l2", decimals: 2}
+  - {name: power_l3, label: "L3 active power", table: input, address: 0x0010, type: float32,
+     unit: W, mode: expression, expression: "voltage_l3 * current_l3 * pf_l3", decimals: 2}
+
+  - {name: va_l1, label: "L1 apparent power", table: input, address: 0x0012, type: float32,
+     unit: VA, mode: expression, expression: "voltage_l1 * current_l1", decimals: 2}
+  - {name: va_l2, label: "L2 apparent power", table: input, address: 0x0014, type: float32,
+     unit: VA, mode: expression, expression: "voltage_l2 * current_l2", decimals: 2}
+  - {name: va_l3, label: "L3 apparent power", table: input, address: 0x0016, type: float32,
+     unit: VA, mode: expression, expression: "voltage_l3 * current_l3", decimals: 2}
+
+  - {name: var_l1, label: "L1 reactive power", table: input, address: 0x0018, type: float32,
+     unit: var, mode: expression, expression: "sqrt(max(va_l1**2 - power_l1**2, 0.0))", decimals: 2}
+  - {name: var_l2, label: "L2 reactive power", table: input, address: 0x001A, type: float32,
+     unit: var, mode: expression, expression: "sqrt(max(va_l2**2 - power_l2**2, 0.0))", decimals: 2}
+  - {name: var_l3, label: "L3 reactive power", table: input, address: 0x001C, type: float32,
+     unit: var, mode: expression, expression: "sqrt(max(va_l3**2 - power_l3**2, 0.0))", decimals: 2}
+
+  # --- system totals ---------------------------------------------------------
+  - {name: average_voltage, label: "Average L-N voltage", table: input, address: 0x002A,
+     type: float32, unit: V, mode: expression, decimals: 2,
+     expression: "(voltage_l1 + voltage_l2 + voltage_l3) / 3.0"}
+  - {name: average_current, label: "Average line current", table: input, address: 0x002E,
+     type: float32, unit: A, mode: expression, decimals: 3,
+     expression: "(current_l1 + current_l2 + current_l3) / 3.0"}
+  - {name: sum_of_currents, label: "Sum of line currents", table: input, address: 0x0030,
+     type: float32, unit: A, mode: expression, decimals: 3,
+     expression: "current_l1 + current_l2 + current_l3"}
+  - {name: total_power, label: "Total system power", table: input, address: 0x0034,
+     type: float32, unit: W, mode: expression, decimals: 2,
+     expression: "power_l1 + power_l2 + power_l3"}
+  - {name: total_va, label: "Total system apparent power", table: input, address: 0x0038,
+     type: float32, unit: VA, mode: expression, decimals: 2,
+     expression: "va_l1 + va_l2 + va_l3"}
+  - {name: total_var, label: "Total system reactive power", table: input, address: 0x003C,
+     type: float32, unit: var, mode: expression, decimals: 2,
+     expression: "var_l1 + var_l2 + var_l3"}
+  - {name: total_pf, label: "Total system power factor", table: input, address: 0x003E,
+     type: float32, mode: expression, decimals: 3,
+     expression: "total_power / max(total_va, 0.001)"}
+  - {name: neutral_current, label: "Neutral current", table: input, address: 0x00E0,
+     type: float32, unit: A, mode: walk, min: 0.0, max: 6.0, start: 1.2, step: 0.3,
+     interval: 10, decimals: 3}
+  - {name: frequency, label: "Frequency", table: input, address: 0x0046, type: float32,
+     unit: Hz, mode: walk, min: 49.90, max: 50.10, start: 50.0, step: 0.03,
+     interval: 10, decimals: 2}
+
+  # --- line to line voltage --------------------------------------------------
+  - {name: voltage_l1_l2, label: "L1-L2 voltage", table: input, address: 0x00C8, type: float32,
+     unit: V, mode: expression, expression: "(voltage_l1 + voltage_l2) / 2 * 1.732", decimals: 2}
+  - {name: voltage_l2_l3, label: "L2-L3 voltage", table: input, address: 0x00CA, type: float32,
+     unit: V, mode: expression, expression: "(voltage_l2 + voltage_l3) / 2 * 1.732", decimals: 2}
+  - {name: voltage_l3_l1, label: "L3-L1 voltage", table: input, address: 0x00CC, type: float32,
+     unit: V, mode: expression, expression: "(voltage_l3 + voltage_l1) / 2 * 1.732", decimals: 2}
+  - {name: average_voltage_ll, label: "Average L-L voltage", table: input, address: 0x00CE,
+     type: float32, unit: V, mode: expression, decimals: 2,
+     expression: "(voltage_l1_l2 + voltage_l2_l3 + voltage_l3_l1) / 3.0"}
+
+  # --- energy counters -------------------------------------------------------
+  - {name: import_active_energy, label: "Import active energy", table: input, address: 0x0048,
+     type: float32, unit: kWh, mode: accumulator, rate: "total_power / 3600000.0",
+     start: 54321.987, max: 99999999.0, interval: 10, decimals: 3}
+  - {name: export_active_energy, label: "Export active energy", table: input, address: 0x004A,
+     type: float32, unit: kWh, mode: fixed, value: 0.0}
+  - {name: import_reactive_energy, label: "Import reactive energy", table: input, address: 0x004C,
+     type: float32, unit: kvarh, mode: accumulator, rate: "total_var / 3600000.0",
+     start: 8765.432, max: 99999999.0, interval: 10, decimals: 3}
+  - {name: export_reactive_energy, label: "Export reactive energy", table: input, address: 0x004E,
+     type: float32, unit: kvarh, mode: fixed, value: 0.0}
+  - {name: total_apparent_energy, label: "Total apparent energy", table: input, address: 0x0050,
+     type: float32, unit: kVAh, mode: accumulator, rate: "total_va / 3600000.0",
+     start: 61234.5, max: 99999999.0, interval: 10, decimals: 3}
+  - {name: total_active_energy, label: "Total active energy", table: input, address: 0x0156,
+     type: float32, unit: kWh, mode: expression, decimals: 3,
+     expression: "import_active_energy + export_active_energy"}
+  - {name: total_reactive_energy, label: "Total reactive energy", table: input, address: 0x0158,
+     type: float32, unit: kvarh, mode: expression, decimals: 3,
+     expression: "import_reactive_energy + export_reactive_energy"}
+
+  # --- demand ----------------------------------------------------------------
+  - {name: total_power_demand, label: "Total system power demand", table: input, address: 0x0054,
+     type: float32, unit: W, mode: expression, expression: "total_power * 0.93",
+     interval: 60, decimals: 2}
+  - {name: max_total_power_demand, label: "Max total system power demand", table: input,
+     address: 0x0056, type: float32, unit: W, mode: expression, start: 0.0,
+     expression: "max(max_total_power_demand, total_power_demand)", interval: 60, decimals: 2}
+
+  # --- holding registers -----------------------------------------------------
+  - {name: network_parity_stop, label: "Network parity / stop bits", table: holding,
+     address: 0x0012, type: float32, mode: fixed, value: 0.0, writable: true}
+  - {name: network_node, label: "Meter id (network node)", table: holding, address: 0x0014,
+     type: float32, mode: fixed, value: 1.0, writable: true}
+  - {name: baud_rate, label: "Baud rate", table: holding, address: 0x001C, type: float32,
+     mode: fixed, value: 2.0, writable: true}
+  - {name: system_type, label: "System type (3=3P4W)", table: holding, address: 0x000A,
+     type: float32, mode: fixed, value: 3.0, writable: true}
+  - {name: serial_number, label: "Serial number", table: holding, address: 0xFC00,
+     type: uint32, mode: fixed, value: 30776451}

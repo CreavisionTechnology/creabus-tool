@@ -1,0 +1,229 @@
+# =============================================================================
+#  Template / feature tour  --  copy this file to describe your own device
+# =============================================================================
+#  Every option CreaBus Tool understands is used at least once below, with a
+#  comment explaining it.  Nothing here is a real product: it exists so you can
+#  see how to describe integer scaled registers, coils, strings, counters and
+#  derived values.  devices/README.md has the same information in prose.
+# =============================================================================
+
+device:
+  name: "Feature tour"          # shown in the UI and by "report server id"
+  model: "TEMPLATE"
+  vendor: "-"
+  description: "Every register type and simulation mode in one profile"
+
+  unit_id: 1                    # the Modbus unit / slave id this device answers on
+  accept_any_unit_id: false     # true = answer whatever unit id the client asks for
+                                # false = reply 0x0B "gateway target failed" to others
+  default_interval: 30          # seconds between value changes, per register default
+  word_order: big               # big    = high 16 bit word first (Eastron, most PLCs)
+                                # little = low word first  (many inverters, "CDAB")
+  byte_order: big               # byte order inside each 16 bit word
+  gap_policy: zero              # zero      = undefined addresses read back as 0
+                                # exception = reply 0x02 "illegal data address"
+
+registers:
+
+  # ---------------------------------------------------------------------------
+  #  mode: walk   - random walk between min and max, at most "step" per update.
+  #                 This is what you want for live measurements: the value moves
+  #                 believably instead of jumping around the whole range.
+  # ---------------------------------------------------------------------------
+  - name: temperature
+    label: "Coolant temperature"
+    table: input                # input | holding | coil | discrete
+    address: 0x0000
+    type: float32
+    unit: "degC"
+    mode: walk
+    min: 18.0
+    max: 92.0
+    start: 41.5                 # value at start up (optional)
+    step: 1.5                   # max change per update
+    interval: 5                 # seconds between updates for this register
+    decimals: 1                 # rounding, for the value and for the UI
+
+  # ---------------------------------------------------------------------------
+  #  mode: random - a fresh uniform sample in [min, max] every interval.
+  # ---------------------------------------------------------------------------
+  - name: wind_speed
+    label: "Wind speed"
+    table: input
+    address: 0x0002
+    type: float32
+    unit: "m/s"
+    mode: random
+    min: 0.0
+    max: 24.0
+    interval: 15
+    decimals: 2
+
+  # ---------------------------------------------------------------------------
+  #  Scaled integers: the wire holds an integer, "scale" converts it to the
+  #  engineering value.  Here the register holds tenths of a volt, so 2401 on
+  #  the wire means 240.1 V.
+  # ---------------------------------------------------------------------------
+  - name: voltage_x10
+    label: "Voltage (0.1 V steps)"
+    table: input
+    address: 0x0004
+    type: uint16
+    unit: V
+    scale: 0.1                  # engineering value = raw * scale
+    mode: walk
+    min: 220.0
+    max: 245.0
+    start: 240.1
+    step: 0.5
+    interval: 5
+    decimals: 1
+
+  - name: power_signed
+    label: "Signed power (import/export)"
+    table: input
+    address: 0x0005
+    type: int32                 # 2 registers, may go negative
+    unit: W
+    mode: walk
+    min: -3500.0
+    max: 4500.0
+    start: 820.0
+    step: 250.0
+    interval: 10
+    decimals: 0
+
+  # ---------------------------------------------------------------------------
+  #  mode: expression - value computed from the other registers, so the device
+  #  stays internally consistent.  Available: every register name, the maths
+  #  functions (sqrt sin cos atan2 log exp floor ceil degrees radians hypot...),
+  #  abs min max round int float pow sum, uniform() gauss() randint() choice(),
+  #  "t" (seconds since start) and "now" (unix time).
+  #  Referencing the register itself gives you a peak hold, see max_temperature.
+  # ---------------------------------------------------------------------------
+  - name: temperature_f
+    label: "Coolant temperature (F)"
+    table: input
+    address: 0x0008
+    type: float32
+    unit: "degF"
+    mode: expression
+    expression: "temperature * 9 / 5 + 32"
+    decimals: 1
+
+  - name: max_temperature
+    label: "Peak coolant temperature"
+    table: input
+    address: 0x000A
+    type: float32
+    unit: "degC"
+    mode: expression
+    expression: "max(max_temperature, temperature)"
+    start: 0.0
+    interval: 5
+    decimals: 1
+
+  - name: daily_profile
+    label: "Load following a daily curve"
+    table: input
+    address: 0x000C
+    type: float32
+    unit: W
+    mode: expression
+    # "t" is the uptime in seconds: a 10 minute sine wave with noise on top
+    expression: "1500 + 900 * sin(t / 600 * 2 * pi) + gauss(0, 40)"
+    interval: 5
+    decimals: 1
+
+  # ---------------------------------------------------------------------------
+  #  mode: accumulator - a counter that only moves in one direction.  "rate" is
+  #  an expression giving the change per second, integrated over the real
+  #  elapsed time, so the totals stay right whatever the interval.
+  #  wrap: true rolls back to "min" instead of sticking at "max".
+  # ---------------------------------------------------------------------------
+  - name: energy_total
+    label: "Energy meter"
+    table: input
+    address: 0x0010
+    type: float32
+    unit: kWh
+    mode: accumulator
+    rate: "daily_profile / 3600000.0"
+    start: 1024.5
+    min: 0.0
+    max: 99999.999
+    wrap: true
+    interval: 10
+    decimals: 3
+
+  - name: run_hours
+    label: "Run hours"
+    table: input
+    address: 0x0012
+    type: uint32
+    unit: h
+    mode: accumulator
+    rate: "1.0 / 3600.0"
+    start: 8123
+    max: 4294967295
+    interval: 60
+
+  # ---------------------------------------------------------------------------
+  #  mode: fixed - never changes on its own.  Identity, configuration, anything
+  #  a client is allowed to write.  Holding registers and coils are writable by
+  #  default; add "writable: false" to make one read only.
+  # ---------------------------------------------------------------------------
+  - name: firmware_version
+    label: "Firmware version"
+    table: holding
+    address: 0x0000
+    type: uint16
+    mode: fixed
+    value: 213                  # 2.13
+    writable: false
+
+  - name: device_tag
+    label: "Device tag"
+    table: holding
+    address: 0x0010
+    type: string
+    length: 16                  # characters -> 8 registers
+    mode: fixed
+    value: "TEMPLATE-01"
+    writable: true
+
+  - name: setpoint
+    label: "Temperature setpoint"
+    table: holding
+    address: 0x0020
+    type: int16
+    unit: "degC"
+    scale: 0.1
+    mode: fixed
+    value: 65.0
+    writable: true              # a client write is kept and held
+
+  # ---------------------------------------------------------------------------
+  #  Single bit tables.  Coils are writable, discrete inputs are read only.
+  # ---------------------------------------------------------------------------
+  - name: pump_enable
+    label: "Pump enable"
+    table: coil
+    address: 0x0000
+    mode: fixed
+    value: true
+
+  - name: alarm_high_temp
+    label: "High temperature alarm"
+    table: discrete
+    address: 0x0000
+    mode: expression
+    expression: "temperature > 80.0"
+    interval: 5
+
+  - name: fault_relay
+    label: "Fault relay"
+    table: discrete
+    address: 0x0001
+    mode: random                # 50/50 every interval
+    interval: 20

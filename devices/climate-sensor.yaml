@@ -1,0 +1,69 @@
+# =============================================================================
+#  Generic room climate sensor  --  a small RTU sensor on an RS-485 bus
+# =============================================================================
+#  This is NOT a particular manufacturer's product and does not pretend to be.
+#  It is the pattern the cheap RS-485 sensors all follow - temperature,
+#  humidity, sometimes CO2 - and it is here for two reasons:
+#
+#    1. It is the smallest realistic device in this folder. If you are
+#       learning Modbus, read this one first: seven registers, one function
+#       code, no scale factor chains.
+#    2. It is the classic "the numbers are 10x too big" trap. Every value is
+#       a plain int16 holding tenths, so 23.4 C is the number 234 on the wire.
+#       Point a client at it with the scale wrong and you get 234 degrees -
+#       which is exactly the mistake this tool exists to make visible.
+#
+#  Small sensors are usually the ones sharing an RS-485 bus at a non-default
+#  unit id, so this one answers on unit 12 rather than 1. Change `unit_id`
+#  below, or override it with --unit, to match yours.
+#
+#  Many of these sensors put their readings in HOLDING registers rather than
+#  input registers, because their designers only implemented function code 3.
+#  This file does the same, which is why the values are marked read only.
+# =============================================================================
+
+device:
+  name: "Generic room climate sensor"
+  model: "Temperature / humidity / CO2, RS-485"
+  vendor: "(no vendor - a generic example)"
+  description: "Small RTU sensor: int16 tenths in holding registers, unit id 12"
+  unit_id: 12
+  default_interval: 20
+  word_order: big
+  byte_order: big
+  gap_policy: exception     # a small sensor answers 0x02 outside its few registers
+
+registers:
+
+  # === the readings =========================================================
+  # int16 tenths. A negative temperature is what makes this int16 and not
+  # uint16 - reading -4.2 C back as 65494 is the other half of the same trap.
+  - {name: temperature, label: "Temperature", table: holding, address: 0, type: int16,
+     unit: "C", scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 17.5, max: 26.5, start: 21.8, step: 0.3, interval: 10}
+  - {name: humidity, label: "Relative humidity", table: holding, address: 1, type: int16,
+     unit: "%RH", scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 32.0, max: 68.0, start: 46.3, step: 1.2, interval: 10}
+  - {name: co2, label: "CO2", table: holding, address: 2, type: uint16,
+     unit: ppm, decimals: 0, writable: false,
+     mode: walk, min: 420.0, max: 1450.0, start: 612.0, step: 45.0, interval: 15}
+
+  # --- derived, so the sensor stays physically consistent --------------------
+  # Dew point by the Magnus approximation, which is what these sensors compute
+  # on board when they offer it at all.
+  - {name: dew_point, label: "Dew point", table: holding, address: 3, type: int16,
+     unit: "C", scale: 0.1, decimals: 1, writable: false, mode: expression,
+     expression: "243.12 * (log(max(humidity, 1.0) / 100.0)
+                            + 17.62 * temperature / (243.12 + temperature))
+                  / (17.62 - (log(max(humidity, 1.0) / 100.0)
+                              + 17.62 * temperature / (243.12 + temperature)))"}
+
+  # === configuration a commissioning tool writes ============================
+  # Writing the unit id is how these sensors are addressed on a shared bus:
+  # you put one on the bus at a time, write its new address, then add the next.
+  - {name: device_address, label: "Modbus address", table: holding, address: 16,
+     type: uint16, mode: fixed, value: 12}
+  - {name: baud_code, label: "Baud rate code (0=9600 1=19200 2=38400)", table: holding,
+     address: 17, type: uint16, mode: fixed, value: 0}
+  - {name: temperature_offset, label: "Temperature offset", table: holding, address: 18,
+     type: int16, unit: "C", scale: 0.1, decimals: 1, mode: fixed, value: 0.0}

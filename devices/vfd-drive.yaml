@@ -1,0 +1,126 @@
+# =============================================================================
+#  Generic variable frequency drive  --  motor starter over Modbus
+# =============================================================================
+#  This is NOT a particular manufacturer's product and does not pretend to be.
+#  Drive register maps differ wildly between vendors - and between families
+#  from the same vendor - so there is no map that would be right for yours.
+#  What IS the same everywhere is the shape:
+#
+#    a control word     one register of command bits (run, stop, reset, ...)
+#    a speed reference  where you want the motor
+#    a status word      one register of state bits, the mirror of the control
+#    feedback           what the motor is actually doing
+#
+#  So this is the profile for building and testing the client side of a drive
+#  integration - the bit packing, the start/stop sequence, the ramp - before
+#  the drive is on the bench, and for reproducing a fault afterwards.
+#
+#  THE SIMULATION IS HONEST ABOUT ONE THING
+#  Write 1 to the run bit and the drive ramps up; write 0 and it coasts down.
+#  Output frequency chases the reference rather than jumping to it, and
+#  current follows load, so a client that watches for "at speed" has something
+#  real to watch. It is a demonstration, not a motor model.
+#
+#  CONTROL WORD BITS (holding 0)     STATUS WORD BITS (input 0)
+#    0  run / stop                     0  ready
+#    1  reverse                        1  running
+#    2  fault reset                    2  at reference speed
+#    3  coast to stop                  3  faulted
+#                                      4  reverse confirmed
+# =============================================================================
+
+device:
+  name: "Generic variable frequency drive"
+  model: "7.5 kW class, 400 V"
+  vendor: "(no vendor - a generic example)"
+  description: "Motor drive: control word, speed reference, status and feedback"
+  unit_id: 2
+  default_interval: 10
+  word_order: big
+  byte_order: big
+  gap_policy: zero
+
+registers:
+
+  # === COMMAND - what the client writes ======================================
+  # The control word as one register, which is how nearly every drive does it.
+  # Reading it back tells you what the drive believes it was told.
+  - {name: control_word, label: "Control word", table: holding, address: 0,
+     type: uint16, mode: fixed, value: 1}
+  - {name: speed_reference, label: "Speed reference", table: holding, address: 1,
+     type: uint16, unit: Hz, scale: 0.01, decimals: 2, mode: fixed, value: 50.00}
+
+  # --- the parameters an integrator sets once --------------------------------
+  - {name: accel_time, label: "Acceleration time", table: holding, address: 2,
+     type: uint16, unit: s, scale: 0.1, decimals: 1, mode: fixed, value: 5.0}
+  - {name: decel_time, label: "Deceleration time", table: holding, address: 3,
+     type: uint16, unit: s, scale: 0.1, decimals: 1, mode: fixed, value: 8.0}
+  - {name: min_frequency, label: "Minimum frequency", table: holding, address: 4,
+     type: uint16, unit: Hz, scale: 0.01, decimals: 2, mode: fixed, value: 10.00}
+  - {name: max_frequency, label: "Maximum frequency", table: holding, address: 5,
+     type: uint16, unit: Hz, scale: 0.01, decimals: 2, mode: fixed, value: 50.00}
+  - {name: motor_rated_current, label: "Motor rated current", table: holding, address: 6,
+     type: uint16, unit: A, scale: 0.01, decimals: 2, mode: fixed, value: 15.20}
+
+  # === STATUS - what the drive reports =======================================
+  # Built from the control word, so the two stay consistent: set the run bit
+  # and bits 1 and 2 of the status word follow.
+  - {name: status_word, label: "Status word", table: input, address: 0, type: uint16,
+     mode: expression,
+     expression: "1 + (2 if run_command else 0) + (4 if at_speed else 0)
+                    + (16 if reverse_command else 0)"}
+
+  - {name: run_command, label: "Run commanded", table: discrete, address: 0,
+     mode: expression, expression: "control_word % 2"}
+  - {name: reverse_command, label: "Reverse commanded", table: discrete, address: 1,
+     mode: expression, expression: "int(control_word / 2) % 2"}
+  - {name: at_speed, label: "At reference speed", table: discrete, address: 2,
+     mode: expression, expression: "abs(output_frequency - speed_reference) < 0.5"}
+  - {name: faulted, label: "Faulted", table: discrete, address: 3,
+     mode: fixed, value: 0}
+
+  # === FEEDBACK - what the motor is actually doing ===========================
+  # Output frequency chases the reference instead of stepping to it, so the
+  # ramp is visible to a client that polls during a start.
+  - {name: output_frequency, label: "Output frequency", table: input, address: 1,
+     type: uint16, unit: Hz, scale: 0.01, decimals: 2, mode: expression,
+     expression: "output_frequency
+                  + max(-4.0, min(4.0,
+                        (speed_reference if run_command else 0.0) - output_frequency))",
+     start: 0.0, min: 0.0, max: 60.0, interval: 1}
+  - {name: motor_speed, label: "Motor speed", table: input, address: 2, type: uint16,
+     unit: rpm, decimals: 0, mode: expression,
+     expression: "output_frequency * 29.4"}
+  - {name: output_current, label: "Output current", table: input, address: 3, type: uint16,
+     unit: A, scale: 0.01, decimals: 2, mode: expression,
+     expression: "output_frequency * 0.21 + (1.4 if run_command else 0.0)
+                  + uniform(0, 0.25)"}
+  - {name: output_voltage, label: "Output voltage", table: input, address: 4, type: uint16,
+     unit: V, scale: 0.1, decimals: 1, mode: expression,
+     expression: "min(400.0, output_frequency * 8.0)"}
+  - {name: output_power, label: "Output power", table: input, address: 5, type: uint16,
+     unit: W, decimals: 0, mode: expression,
+     expression: "output_voltage * output_current * 1.732 * 0.85"}
+  - {name: output_torque, label: "Output torque", table: input, address: 6, type: int16,
+     unit: "%", scale: 0.1, decimals: 1, mode: expression,
+     expression: "output_current / max(motor_rated_current, 0.1) * 100.0"}
+  - {name: dc_bus_voltage, label: "DC bus voltage", table: input, address: 7, type: uint16,
+     unit: V, scale: 0.1, decimals: 1, mode: walk, min: 530.0, max: 580.0, start: 561.0,
+     step: 3.0, interval: 5}
+  - {name: heatsink_temperature, label: "Heat sink temperature", table: input, address: 8,
+     type: int16, unit: "C", scale: 0.1, decimals: 1, mode: expression,
+     expression: "28.0 + output_power / 700.0"}
+
+  # --- counters --------------------------------------------------------------
+  - {name: run_time, label: "Run time", table: input, address: 10, type: uint32,
+     unit: h, decimals: 2, mode: accumulator, rate: "run_command / 3600.0",
+     start: 6184, max: 1000000, interval: 30}
+  - {name: energy_total, label: "Energy consumed", table: input, address: 12, type: uint32,
+     unit: Wh, decimals: 0, mode: accumulator, rate: "output_power / 3600.0",
+     start: 24815000, max: 4000000000, interval: 10}
+
+  # --- the last fault code, and identity ------------------------------------
+  - {name: last_fault, label: "Last fault code", table: input, address: 14, type: uint16,
+     mode: fixed, value: 0}
+  - {name: drive_model, label: "Drive model", table: input, address: 20, type: string,
+     length: 16, mode: fixed, value: "SIM-VFD-7K5"}

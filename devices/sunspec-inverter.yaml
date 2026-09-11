@@ -1,0 +1,209 @@
+# =============================================================================
+#  SunSpec inverter  --  Common Model (1) + Inverter, Three Phase (103)
+# =============================================================================
+#  WHERE THIS MAP COMES FROM
+#  SunSpec is an open, published specification from the SunSpec Alliance, not
+#  one manufacturer's map. Model 103 is implemented by a large share of grid
+#  tied string inverters - SMA, Fronius, SolarEdge, Delta, Chint and others all
+#  offer a SunSpec interface, often alongside their own native map. So this
+#  profile is a reasonable first thing to point at an unknown inverter.
+#
+#  It is NOT a substitute for your inverter's manual. Check three things
+#  before trusting a reading:
+#
+#    1. The base address. A SunSpec device puts its map at Modbus register
+#       40001, 50001 or 1 - which as a protocol address (what goes on the
+#       wire, counting from zero) means 40000, 50000 or 0. This file uses
+#       40000. If yours uses another, shift every address here by the same
+#       amount; the offsets between them do not change.
+#    2. The unit id, and on some inverters that Modbus is enabled at all.
+#    3. Which models your inverter actually implements. Walk the chain: read
+#       "SunS" at the base, then each model's id and length, and hop
+#       id+length+2 registers to the next until you reach id 65535.
+#
+#  SCALE FACTORS
+#  SunSpec stores integers with a separate power-of-ten scale factor register:
+#  the real value is raw x 10^SF. The _sf registers below hold those exponents,
+#  and each measurement carries a matching `scale` so this tool shows you
+#  engineering units while the register still holds what a real device would.
+#  Read A_SF from a real inverter before assuming it matches this file.
+#
+#  Everything lives in HOLDING registers (function code 3), as SunSpec requires.
+# =============================================================================
+
+device:
+  name: "SunSpec inverter"
+  model: "Model 103, three phase"
+  vendor: "SunSpec Alliance (open specification)"
+  description: "Grid tied three phase PV inverter, ~10 kW, SunSpec Common + 103"
+  unit_id: 1
+  default_interval: 30
+  word_order: big          # SunSpec is high word first throughout
+  byte_order: big
+  gap_policy: zero         # so a client can block read a whole model
+
+registers:
+
+  # === the marker that says "this is a SunSpec device" ========================
+  # 0x53756E53, "SunS" in ASCII. A client reads this first to find the map.
+  - {name: sunspec_id, label: "SunSpec marker", table: holding, address: 40000,
+     type: string, length: 4, mode: fixed, value: "SunS", writable: false}
+
+  # === Common Model, id 1, length 66 =========================================
+  - {name: common_id, label: "Common model id", table: holding, address: 40002,
+     type: uint16, mode: fixed, value: 1, writable: false}
+  - {name: common_length, label: "Common model length", table: holding, address: 40003,
+     type: uint16, mode: fixed, value: 66, writable: false}
+
+  - {name: manufacturer, label: "Manufacturer (Mn)", table: holding, address: 40004,
+     type: string, length: 32, mode: fixed, value: "Creavision", writable: false}
+  - {name: model_name, label: "Model (Md)", table: holding, address: 40020,
+     type: string, length: 32, mode: fixed, value: "Simulated 3P inverter", writable: false}
+  - {name: options, label: "Options (Opt)", table: holding, address: 40036,
+     type: string, length: 16, mode: fixed, value: "sim", writable: false}
+  - {name: firmware, label: "Version (Vr)", table: holding, address: 40044,
+     type: string, length: 16, mode: fixed, value: "1.0.0", writable: false}
+  - {name: serial_number, label: "Serial number (SN)", table: holding, address: 40052,
+     type: string, length: 32, mode: fixed, value: "SIM-0000000001", writable: false}
+  - {name: device_address, label: "Modbus address (DA)", table: holding, address: 40068,
+     type: uint16, mode: fixed, value: 1, writable: false}
+
+  # === Inverter model, id 103, length 50 =====================================
+  - {name: inverter_id, label: "Inverter model id", table: holding, address: 40070,
+     type: uint16, mode: fixed, value: 103, writable: false}
+  - {name: inverter_length, label: "Inverter model length", table: holding, address: 40071,
+     type: uint16, mode: fixed, value: 50, writable: false}
+
+  # --- AC current, A_SF = -2 so raw is hundredths of an amp -------------------
+  - {name: ac_current, label: "AC current (A)", table: holding, address: 40072,
+     type: uint16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: expression, expression: "ac_current_a + ac_current_b + ac_current_c"}
+  - {name: ac_current_a, label: "AC current L1 (AphA)", table: holding, address: 40073,
+     type: uint16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: expression,
+     expression: "ac_power / 3.0 / max(voltage_a, 1.0)
+                  / max(power_factor / 100.0, 0.5)"}
+  - {name: ac_current_b, label: "AC current L2 (AphB)", table: holding, address: 40074,
+     type: uint16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: expression,
+     expression: "ac_power / 3.0 / max(voltage_b, 1.0)
+                  / max(power_factor / 100.0, 0.5)"}
+  - {name: ac_current_c, label: "AC current L3 (AphC)", table: holding, address: 40075,
+     type: uint16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: expression,
+     expression: "ac_power / 3.0 / max(voltage_c, 1.0)
+                  / max(power_factor / 100.0, 0.5)"}
+  - {name: ac_current_sf, label: "A_SF", table: holding, address: 40076,
+     type: int16, mode: fixed, value: -2, writable: false}
+
+  # --- AC voltage, V_SF = -1 -------------------------------------------------
+  - {name: voltage_ab, label: "Voltage L1-L2 (PPVphAB)", table: holding, address: 40077,
+     type: uint16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "(voltage_a + voltage_b) / 2 * 1.732"}
+  - {name: voltage_bc, label: "Voltage L2-L3 (PPVphBC)", table: holding, address: 40078,
+     type: uint16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "(voltage_b + voltage_c) / 2 * 1.732"}
+  - {name: voltage_ca, label: "Voltage L3-L1 (PPVphCA)", table: holding, address: 40079,
+     type: uint16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "(voltage_c + voltage_a) / 2 * 1.732"}
+  - {name: voltage_a, label: "Voltage L1-N (PhVphA)", table: holding, address: 40080,
+     type: uint16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 228.0, max: 244.0, start: 236.4, step: 0.7, interval: 5}
+  - {name: voltage_b, label: "Voltage L2-N (PhVphB)", table: holding, address: 40081,
+     type: uint16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 228.0, max: 244.0, start: 235.1, step: 0.7, interval: 5}
+  - {name: voltage_c, label: "Voltage L3-N (PhVphC)", table: holding, address: 40082,
+     type: uint16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 228.0, max: 244.0, start: 237.9, step: 0.7, interval: 5}
+  - {name: voltage_sf, label: "V_SF", table: holding, address: 40083,
+     type: int16, mode: fixed, value: -1, writable: false}
+
+  # --- AC power, W_SF = 0 ----------------------------------------------------
+  # The inverter's whole output: DC in, minus conversion loss.
+  - {name: ac_power, label: "AC power (W)", table: holding, address: 40084,
+     type: int16, unit: W, decimals: 0, writable: false,
+     mode: expression, expression: "dc_power * 0.975"}
+  - {name: ac_power_sf, label: "W_SF", table: holding, address: 40085,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- frequency, Hz_SF = -2 -------------------------------------------------
+  - {name: frequency, label: "Frequency (Hz)", table: holding, address: 40086,
+     type: uint16, unit: Hz, scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 49.90, max: 50.10, start: 50.01, step: 0.02, interval: 5}
+  - {name: frequency_sf, label: "Hz_SF", table: holding, address: 40087,
+     type: int16, mode: fixed, value: -2, writable: false}
+
+  # --- apparent and reactive power, both SF = 0 ------------------------------
+  - {name: apparent_power, label: "Apparent power (VA)", table: holding, address: 40088,
+     type: int16, unit: VA, decimals: 0, writable: false,
+     mode: expression, expression: "ac_power / max(power_factor / 100.0, 0.5)"}
+  - {name: apparent_power_sf, label: "VA_SF", table: holding, address: 40089,
+     type: int16, mode: fixed, value: 0, writable: false}
+  - {name: reactive_power, label: "Reactive power (VAr)", table: holding, address: 40090,
+     type: int16, unit: var, decimals: 0, writable: false,
+     mode: expression,
+     expression: "sqrt(max(apparent_power * apparent_power - ac_power * ac_power, 0.0))"}
+  - {name: reactive_power_sf, label: "VAr_SF", table: holding, address: 40091,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- power factor. SunSpec model 103 carries this as a percentage ----------
+  - {name: power_factor, label: "Power factor (PF)", table: holding, address: 40092,
+     type: int16, unit: "%", scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 96.0, max: 100.0, start: 99.2, step: 0.4, interval: 10}
+  - {name: power_factor_sf, label: "PF_SF", table: holding, address: 40093,
+     type: int16, mode: fixed, value: -2, writable: false}
+
+  # --- lifetime energy, acc32, WH_SF = 0 -------------------------------------
+  - {name: energy_total, label: "Lifetime energy (WH)", table: holding, address: 40094,
+     type: uint32, unit: Wh, decimals: 0, writable: false,
+     mode: accumulator, rate: "ac_power / 3600.0", start: 41250000, max: 4000000000,
+     interval: 10}
+  - {name: energy_total_sf, label: "WH_SF", table: holding, address: 40096,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- DC side. One combined string; per string data lives in model 160 ------
+  - {name: dc_current, label: "DC current (DCA)", table: holding, address: 40097,
+     type: uint16, unit: A, scale: 0.01, decimals: 2, writable: false,
+     mode: walk, min: 0.5, max: 17.5, start: 12.6, step: 1.2, interval: 5}
+  - {name: dc_current_sf, label: "DCA_SF", table: holding, address: 40098,
+     type: int16, mode: fixed, value: -2, writable: false}
+  - {name: dc_voltage, label: "DC voltage (DCV)", table: holding, address: 40099,
+     type: uint16, unit: V, scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 560.0, max: 820.0, start: 703.0, step: 9.0, interval: 5}
+  - {name: dc_voltage_sf, label: "DCV_SF", table: holding, address: 40100,
+     type: int16, mode: fixed, value: -1, writable: false}
+  - {name: dc_power, label: "DC power (DCW)", table: holding, address: 40101,
+     type: int16, unit: W, decimals: 0, writable: false,
+     mode: expression, expression: "dc_voltage * dc_current"}
+  - {name: dc_power_sf, label: "DCW_SF", table: holding, address: 40102,
+     type: int16, mode: fixed, value: 0, writable: false}
+
+  # --- temperatures, Tmp_SF = -1. Only the heat sink is populated here, as on
+  #     most real inverters; the others read zero.
+  - {name: temp_cabinet, label: "Cabinet temperature (TmpCab)", table: holding, address: 40103,
+     type: int16, unit: "C", scale: 0.1, decimals: 1, writable: false,
+     mode: walk, min: 22.0, max: 44.0, start: 31.5, step: 0.6, interval: 20}
+  - {name: temp_heatsink, label: "Heat sink temperature (TmpSnk)", table: holding, address: 40104,
+     type: int16, unit: "C", scale: 0.1, decimals: 1, writable: false,
+     mode: expression, expression: "temp_cabinet + dc_power / 900.0"}
+  - {name: temp_sf, label: "Tmp_SF", table: holding, address: 40107,
+     type: int16, mode: fixed, value: -1, writable: false}
+
+  # --- operating state. 1 off, 2 sleeping, 3 starting, 4 MPPT, 5 throttled,
+  #     6 shutting down, 7 fault, 8 standby.
+  - {name: operating_state, label: "Operating state (St)", table: holding, address: 40108,
+     type: uint16, mode: fixed, value: 4, writable: false}
+  - {name: vendor_state, label: "Vendor state (StVnd)", table: holding, address: 40109,
+     type: uint16, mode: fixed, value: 0, writable: false}
+
+  # --- event bitfields. All clear: a healthy inverter. -----------------------
+  - {name: event_1, label: "Events 1 (Evt1)", table: holding, address: 40110,
+     type: uint32, mode: fixed, value: 0, writable: false}
+  - {name: event_2, label: "Events 2 (Evt2)", table: holding, address: 40112,
+     type: uint32, mode: fixed, value: 0, writable: false}
+
+  # === end of the model chain, id 65535 ======================================
+  - {name: end_id, label: "End model id", table: holding, address: 40122,
+     type: uint16, mode: fixed, value: 65535, writable: false}
+  - {name: end_length, label: "End model length", table: holding, address: 40123,
+     type: uint16, mode: fixed, value: 0, writable: false}

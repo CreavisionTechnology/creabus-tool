@@ -1,0 +1,259 @@
+name: test and build
+
+# Publishing a release through the GitHub UI creates the tag, which fires the
+# push trigger below - so there is deliberately no `release` trigger here. With
+# both, every release ran the whole matrix twice and a flake in either copy
+# showed up as a failed run against the release.
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tk (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Protocol and device self test
+        run: python tools/selftest.py
+
+      - name: Transport and client self test
+        run: python tools/selftest_links.py
+
+      # The UI test needs a display. Linux gets a virtual one; the macOS
+      # runners have no reliable window server, so it is skipped there.
+      - name: UI smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python tools/uitest.py
+
+      - name: UI smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: python tools/uitest.py
+
+      - name: Editor and help test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python tools/editortest.py
+
+      - name: Editor and help test (Windows)
+        if: runner.os == 'Windows'
+        run: python tools/editortest.py
+
+  build:
+    name: build on ${{ matrix.os }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04        # oldest glibc we support, for portability
+            artifact: creabus-tool-linux-x86_64
+          - os: windows-latest
+            artifact: creabus-tool-windows-x86_64
+          - os: macos-15-intel      # Intel. macos-13 was retired, and a job
+            artifact: creabus-tool-macos-x86_64   # asking for it queues for ever
+          - os: macos-14            # Apple silicon
+            artifact: creabus-tool-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tk (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Build
+        run: python build.py --clean
+
+      - name: Check the binary starts
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            ./dist/creabus-tool-cli.exe --version
+            ./dist/creabus-tool-cli.exe --list
+            # The console build is the command line half of the app. Given
+            # nothing to do it must print its help, not open a window: on a
+            # runner there is nobody to close one, so this also hangs the job
+            # if that ever regresses.
+            ./dist/creabus-tool-cli.exe > cli-no-args.txt
+            grep -q -- "--headless" cli-no-args.txt
+            grep -q "command line build" cli-no-args.txt
+          else
+            ./dist/creabus-tool --version
+            ./dist/creabus-tool --list
+          fi
+          test -s dist/HOW-TO-RUN.txt
+
+      # The bill of materials is generated on the build machine, where the
+      # versions in it are the versions that actually went into the binary.
+      - name: Software bill of materials
+        run: python tools/sbom.py
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p release
+          cp README.md LICENSE THIRD-PARTY-NOTICES.md SECURITY.md release/
+          cp sbom.cdx.json release/
+          cp dist/HOW-TO-RUN.txt release/
+          cp -r devices release/
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            cp dist/creabus-tool.exe dist/creabus-tool-cli.exe release/
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            cp dist/creabus-tool release/
+            cp -R dist/creabus-tool.app release/
+          else
+            cp dist/creabus-tool release/
+          fi
+
+      # Zip here, on the machine that built it. actions/upload-artifact does
+      # not preserve file permissions - everything comes back mode 644 - so a
+      # binary uploaded loose arrives without its executable bit, and a .app
+      # whose inner binary is not executable fails to open with a bare
+      # "can't be opened". A zip is an opaque file to the artifact store, and
+      # the modes recorded inside it survive the round trip untouched.
+      - name: Zip (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd release
+          # -y keeps symlinks as symlinks, which .app bundles rely on
+          zip -qry "../${{ matrix.artifact }}.zip" .
+          cd ..
+
+      # The 0.0.1 macOS build shipped a .app that would not open because the
+      # executable bit had been stripped in transit. Nothing downstream can
+      # notice that, and the user just sees "can't be opened" - so prove it
+      # here, on the real archive, before it goes anywhere.
+      - name: Verify the archive holds runnable binaries
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          tmp=$(mktemp -d)
+          unzip -q "${{ matrix.artifact }}.zip" -d "$tmp"
+          fail=0
+          for binary in "creabus-tool" "creabus-tool.app/Contents/MacOS/creabus-tool"; do
+            path="$tmp/$binary"
+            [ -e "$path" ] || continue
+            if [ -x "$path" ]; then
+              echo "  ok              $binary"
+            else
+              echo "  NOT EXECUTABLE  $binary"
+              fail=1
+            fi
+          done
+          if [ "$fail" != "0" ]; then
+            echo "refusing to ship an archive whose binaries will not run"
+            exit 1
+          fi
+          # and it really does start, straight out of the archive
+          "$tmp/creabus-tool" --version
+          grep -q "which file do I open" "$tmp/HOW-TO-RUN.txt"
+
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path release\* -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: build
+    # Pushing a v* tag is all it takes: this collects the four platform
+    # builds and creates (or updates) the GitHub release with them attached.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # needed to create the release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # The zips arrive ready made, one per artifact directory. They are moved
+      # rather than rebuilt: re-zipping here is exactly what used to destroy
+      # the executable bits.
+      - name: Collect the platform zips
+        run: |
+          mkdir -p release
+          find artifacts -name '*.zip' -exec mv {} release/ \;
+          ls -la release
+
+      - name: Check every platform is present
+        run: |
+          cd release
+          missing=0
+          for expected in creabus-tool-linux-x86_64 creabus-tool-windows-x86_64 \
+                          creabus-tool-macos-x86_64 creabus-tool-macos-arm64; do
+            if [ ! -f "$expected.zip" ]; then
+              echo "missing: $expected.zip"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || {
+            echo "refusing to publish an incomplete release"
+            exit 1
+          }
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: CreaBus Tool ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: false
+          body: |
+            Standalone builds of CreaBus Tool ${{ github.ref_name }}. Nothing to
+            install: download the zip for your platform, unzip it, and run it.
+
+            | platform | file |
+            | --- | --- |
+            | Windows x86-64 | `creabus-tool-windows-x86_64.zip` |
+            | Linux x86-64 | `creabus-tool-linux-x86_64.zip` |
+            | macOS Intel | `creabus-tool-macos-x86_64.zip` |
+            | macOS Apple silicon | `creabus-tool-macos-arm64.zip` |
+
+            Each archive carries the executable, the device profiles, the
+            README, the GPL-3.0 licence, the third party notices, the security
+            policy and a CycloneDX software bill of materials, plus a
+            `HOW-TO-RUN.txt` saying which of the files is the one to open.
+
+            macOS quarantines an unsigned app that arrived over the internet.
+            Clear it once with:
+            `xattr -dr com.apple.quarantine /path/to/creabus-tool.app`
+
+            Free software under the GNU General Public License v3 or later.
+            Made by [Creavision Technology](https://creavisiontechnology.com).
+          files: release/*.zip
