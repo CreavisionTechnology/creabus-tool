@@ -14,11 +14,16 @@ number is 0, anything may still change.
 
 ---
 
-## 0.0.3 — unreleased
+## 0.1.0 — 2026-09-11
 
-Renamed to **CreaBus Tool**, relicensed to the **GPL**, and the expression
-language turned into a real boundary. Also the first version shaped by using
-the tool against real hardware rather than against itself.
+**The first public release.** Renamed to **CreaBus Tool**, relicensed to the
+**GPL**, and the expression language turned into a real boundary. Also the
+first version shaped by using the tool against real hardware rather than
+against itself.
+
+Numbered 0.1.0 rather than 0.0.3 because this is the one people can actually
+download: the earlier numbers were developed in a private repository and never
+published.
 
 ### Changed — name and licence
 
@@ -166,10 +171,10 @@ the tool against real hardware rather than against itself.
 
 ---
 
-## 0.0.2 — unreleased
+## 0.0.2 — never released
 
-Merged and tested, but never tagged, so there is no 0.0.2 download. Everything
-here ships as part of 0.0.3.
+Developed in the private repository and never tagged. Everything here ships as
+part of 0.1.0, and it is listed separately only so the history is followable.
 
 ### Added
 
