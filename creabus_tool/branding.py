@@ -26,7 +26,7 @@ try:
 except ImportError:                       # pragma: no cover - depends on the install
     tk = ttk = None                       # type: ignore[assignment]
 
-VERSION = "0.0.3"
+VERSION = "0.1.0"
 APP_NAME = "CreaBus Tool"
 TAGLINE = "Modbus simulator and client, over TCP and RTU"
 VENDOR = "Creavision Technology"

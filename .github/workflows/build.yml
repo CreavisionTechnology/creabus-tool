@@ -7,7 +7,12 @@ name: test and build
 on:
   push:
     branches: [main, master]
-    tags: ["v*"]
+    # Both forms, because tagging 0.1.0 instead of v0.1.0 is an easy slip and
+    # the failure is silent: no run starts, and the release sits there with
+    # only the two source archives GitHub makes by itself.
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+      - "[0-9]+.[0-9]+.[0-9]+*"
   pull_request:
   workflow_dispatch:
 
@@ -193,9 +198,10 @@ jobs:
   publish:
     name: publish the release
     needs: build
-    # Pushing a v* tag is all it takes: this collects the four platform
-    # builds and creates (or updates) the GitHub release with them attached.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Pushing a version tag is all it takes - v0.1.0 or 0.1.0, both are
+    # matched above: this collects the four platform builds and creates (or
+    # updates) the GitHub release with them attached.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write          # needed to create the release
